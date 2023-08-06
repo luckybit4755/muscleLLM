@@ -4,13 +4,17 @@
 import argparse
 import logging
 import os
+import re
 
 from langchain.llms import LlamaCpp
 from langchain import PromptTemplate, LLMChain
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 
-from langchain.chains import ConversationChain
+from langchain.chains import (
+    ConversationChain,
+    ConversationalRetrievalChain,
+)
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import (
     AIMessage,
@@ -27,60 +31,96 @@ from langchain.vectorstores.faiss import FAISS
 from datetime import datetime
 from langchain.memory import VectorStoreRetrieverMemory
 
-from utils import read_txt_files, default_dict
+import pandas as pd
+from tabulate import tabulate
 
+from utils import read_txt_files, default_dict, load_document
+
+#############################################################################
+
+#############################################################################
+#
+#
+#
+#
+#
+#############################################################################
 class MuscleLLM:
     LOG = logging.getLogger(__name__)
     DEFAULT_PERSONALITY_OPTIONS = { "bye": "bye", "hi": "hi", "llm": "AI", "user": "Human"}
+
     def __init__(self):
         self.argumentParser = self.makeArgumentParser()
 
     def main(self):
+        
         args = self.argumentParser.parse_args()
 
         personality = self.readPersonality( args )
 
-        embeddings, vectorstore, memory = self.youreTalkingAboutMemory(args,personality)
+        embeddings, history, dox, memory = self.youreTalkingAboutMemory(args,personality)
 
-        prompt = self.createPrompt( personality );
+        prompt, input_variables = self.createPrompt( personality )
 
         llm = self.createLLM(args)
 
-        ########################################################################
-        # chain
+        chain = LLMChain(prompt=prompt, llm=llm)
 
-        chain = ConversationChain(
-            prompt=prompt,
-            llm=llm,
-            memory=memory,
-            verbose=False,
-            #memory=ConversationBufferMemory(
-            #    human_prefix=personality['user'],
-            #    ai_prefix=personality['llm'],
-            #),
-        )
+        # TODO: clean this up
+        help, commands = self.getHelp( args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain )
 
         ########################################################################
         # weaksauce shell
 
-        print( f"type {personality['bye']} or /quit to exit" );
-        print( chain.predict(input=personality['hi']) )
+        commands["/help"]({})
+        print( chain.predict(**input_variables) )
 
         while True:
             loser_says_what = input(f"----\n{personality['user']}>> " )
-            response = chain.predict(input=loser_says_what)
-            print( f"\n{personality['llm']}>> {response}" )
+            input_parts = loser_says_what.strip().split()
+            if 0 == len( input_parts ):
+                continue
 
-            # idk if this helps...
-            #memory.save_context({"input":loser_says_what},{"output":response})
+            # handle commands 
+            command = input_parts[0]
+            if command in commands:
+                shouldQuit = commands[command](input_parts[1:])
+                if shouldQuit:
+                    break
+                continue
+            if "/" == command[0]:
+                print(f"unknown command:{command}")
+                continue
+
+            # prepare the inputs
+
+            input_variables['input'] = loser_says_what
+
+            input_variables['history'], matched_docs = self.searchVectorStore(
+                loser_says_what, 
+                history,
+                args.history_search_results,
+            )
+
+            if 'dox' in input_variables:
+                input_variables['dox'], matched_docs = self.searchVectorStore(
+                    loser_says_what, 
+                    dox,
+                    args.dox_search_results,
+                )
+
+            # predict, display, and save the results
+
+            response = chain.predict(**input_variables)
+            print( f"\n{personality['llm']}>> {response}" )
             memory.save_context( {personality['user']:loser_says_what}, {personality['llm']:response}) 
 
-            if "/quit" == loser_says_what or loser_says_what.lower() == personality['bye'].lower():
+            # handle bye 
+
+            if loser_says_what.lower() == personality['bye'].lower():
                 break
 
-        print('saving conversation')
-        vectorstore.save_local(args.index_directory, args.personality)
-        print('saved conversation')
+        commands["/save"]({})
 
 
     def readPersonality(self, args):    
@@ -89,23 +129,31 @@ class MuscleLLM:
             MuscleLLM.DEFAULT_PERSONALITY_OPTIONS
         )
 
+    def getHelp(self, args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain ):
+        help = {
+            personality['bye']: "say bye and quit the chat",
+            "/quit"           : "don't say bye, just quit",
+            "/help"           : "print this thing",
+            "/dox"            : "search and print dox matching the text",
+            "/history"        : "search and print history matching the text",
+            "/add <filename>" : "add a file to the dox",
+            "/save"           : "save history and dox",
+        }
+        commands = {
+            "/quit"     : lambda values: True,
+            "/help"     : lambda values: self.printTable(help,{"name": "input", "value": "result"}),
+            "/dox"      : lambda values: self.searchDox(values, dox, args.dox_search_results),
+            "/history"  : lambda values: self.searchDox(values, history, args.history_search_results),
+            "/add"      : lambda values: self.addDox(values, dox, args),
+            "/save"     : lambda values: self.saveDox(history, dox, args.index_directory, args.personality)
+        }
+        return help, commands
+
 
     def youreTalkingAboutMemory(self, args, personality):
-        ########################################################################
-        # index....
-
         embeddings = HuggingFaceEmbeddings(model_name=args.embeddings_model_name)
-
-        # https://python.langchain.com/docs/modules/memory/types/vectorstore_retriever_memory
-        if os.path.exists(f'{args.index_directory}/{args.personality}.faiss'):
-            vectorstore = FAISS.load_local(args.index_directory, embeddings, args.personality)
-        else:
-            vectorstore = FAISS(
-                embeddings.embed_query, 
-                faiss.IndexFlatL2(384), # for openAi embed is 1536
-                InMemoryDocstore({}),
-                {} #index_to_docstore_id
-            )
+        vectorstore = self.createVectorStore(args.index_directory, embeddings, args.personality)
+        dox = self.createVectorStore(args, embeddings, f'{args.personality}-dox')
 
         retriever = vectorstore.as_retriever(search_kwargs=dict(k=1))
         memory = VectorStoreRetrieverMemory(
@@ -114,34 +162,42 @@ class MuscleLLM:
             ai_prefix=personality['llm'],
         )
 
-        return embeddings, vectorstore, memory
+        return embeddings, vectorstore, dox, memory
+
+
+    def createVectorStore(self, index_directory, embeddings, storeName):
+        if os.path.exists(f'{index_directory}/{storeName}.faiss'):
+            vectorstore = FAISS.load_local(index_directory, embeddings, storeName)
+        else:
+            vectorstore = FAISS(
+                embeddings.embed_query, 
+                faiss.IndexFlatL2(384), # FIXME: let's not hard code stuff.. for openAi embed is 1536
+                InMemoryDocstore({}),
+                {} #index_to_docstore_id
+            )
+        return vectorstore
 
 
     def createPrompt(self, personality):
         template = personality['chat']
         for k,v in personality.items():
             template = template.replace("{" + k + "}",v)
-        return PromptTemplate(
-            input_variables=["history", "input"], 
-            template=template,
-        )
+
+        pattern = r'\{([a-zA-Z]+)\}'  # Matches {xxx} and captures xxx
+        variables = re.findall(pattern, template)
+
+        input_variables = {}
+        for v in variables:
+            input_variables[v] = ""
+
+        prompt = PromptTemplate( input_variables=variables, template=template,)
+        return prompt, input_variables
 
 
     def createLLM(self, args):
-        #callback_manager     Optional[BaseCallbackManager] = None
-        #callbacks            Callbacks = None
         callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
-
-        n_gpu_layers = 40  # Change this value based on your model and your GPU VRAM pool.
-        n_batch      = 512 # Should be between 1 and n_ctx, consider the amount of VRAM in your GPU.
-        n_ctx        = 512 # tweak this too...
-
-        # smallest: llama-2-7b-chat.ggmlv3.q2_K.bin   5g
-        # biggest:  llama-2-7b-chat.ggmlv3.q8_0.bin  10g
-        model_path   = "models/Llama-2-7B-Chat-GGML/llama-2-7b-chat.ggmlv3.q8_0.bin"
-
-        MuscleLLM.LOG.info( f'loading ${model_path}' )
-        print( f'MM: loading ${model_path}' )
+        MuscleLLM.LOG.info( f'loading ${args.model_path}' )
+        print( f'MM: loading ${args.model_path}' )
         llm = LlamaCpp(
             model_path=args.model_path,
             cache=args.cache,
@@ -176,9 +232,60 @@ class MuscleLLM:
             #model_kwargs={ "color":True },
         )
 
-        MuscleLLM.LOG.info( f'loaded ${model_path}' )
-        print( f'MMloaded ${model_path}' )
+        MuscleLLM.LOG.info( f'loaded ${args.model_path}' )
+        print( f'MMloaded ${args.model_path}' )
         return llm
+
+
+    def searchVectorStore(self, query, vectorstore, maxDox=3):
+        MuscleLLM.LOG.info( f'finding documents for {query}' )
+        matched_docs = vectorstore.similarity_search(query, maxDox)
+        txt = ""
+        for doc in matched_docs:
+            txt = txt + doc.page_content + " \n\n "
+        MuscleLLM.LOG.info( f'found documents for {query}: {matched_docs}' )
+        return txt, matched_docs
+
+
+    def printTable(self, uDict, labels = {"name": "name", "value": "value"} ):
+        output_list = [{labels["name"]: key, labels["value"]: value} for key, value in uDict.items()]
+        print(tabulate(pd.DataFrame( output_list ), headers='keys', tablefmt='psql', showindex=False))
+
+    
+    def searchDox(self, query, vectorstore, maxDox=3):
+        query = " ".join( query )
+        matched_docs = vectorstore.similarity_search(query, maxDox)
+        print("-"*77)
+        print("search for:", query)
+        for doc in matched_docs:
+            print(">>>", doc, doc.page_content )
+            print("-"*33)
+        print("-"*77)
+
+
+    # TODO: scrounge https://www.mlq.ai/autogpt-langchain-research-assistant/
+    def addDox(search, filenames, vectorstore, args):
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=args.dox_chunk_size, chunk_overlap=args.dox_chunk_overlap)
+        for filename in filenames:
+            print(f"loading document", filename)
+            document = load_document( filename )
+            if document:
+                print(f"loaded document", filename, type(document) )
+                texts = text_splitter.split_documents(document)
+                vectorstore.add_documents(texts)
+                print(f"added document", filename, type(texts) )
+            else:
+                print(f"failed to load document", filename)
+
+
+    # TODO: track dirty
+    def saveDox(self, history, dox, index_directory, personality ):
+        print('saving conversation')
+        history.save_local(index_directory, personality)
+        print('saved conversation')
+        print('saving dox')
+        dox.save_local(index_directory, personality+"-dox")
+        print('saved dox')
 
 
     def makeArgumentParser(self):
@@ -189,6 +296,12 @@ class MuscleLLM:
         personality.add_argument("--personality", "-p",  type=str, default="muscle-man")
         personality.add_argument("--personality_directory", type=str, default="personality")
         personality.add_argument("--index_directory", type=str, default="index")
+
+        search = argumentParser.add_argument_group("search")
+        search.add_argument("--dox_chunk_size",         type=int, default=512, help="for the RecursiveCharacterTextSplitter")
+        search.add_argument("--dox_chunk_overlap",      type=int, default=64,  help="for the RecursiveCharacterTextSplitter")
+        search.add_argument("--dox_search_results",     type=int, default=3,   help="number of results for dox search")
+        search.add_argument("--history_search_results", type=int, default=3,   help="number of results for history search")
 
         model = argumentParser.add_argument_group("model")
         model.add_argument("--model_path",        "-m",  type=str,        required=True  , help="Path to model to load")

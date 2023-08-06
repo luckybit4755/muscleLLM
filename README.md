@@ -47,7 +47,12 @@ You can contribute if you want!
 
 ## even more dependencies
 
-1. pip install langchain sentence_transformers faiss-gpu
+1. pip install -r requirements.txt
 3. ./muscleLLM.py -m models/StableBeluga-13B-GGML/stablebeluga-13b.ggmlv3.q2_K.bin
 3. ./muscleLLM.py -m models/StableBeluga-13B-GGML/stablebeluga-13b.ggmlv3.q2_K.bin -p ai 
 
+# ideas for more awesome:
+
+1. research assistant
+2. multi-actor stories
+3. it seems like the FAISS vectorstore is... losing information... or search is wonky... may need to switch to something else...

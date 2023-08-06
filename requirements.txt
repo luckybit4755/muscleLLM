@@ -1,0 +1,5 @@
+faiss-gpu 
+langchain 
+pandas
+sentence_transformers 
+tabulate
