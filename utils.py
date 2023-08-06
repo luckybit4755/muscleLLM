@@ -11,3 +11,10 @@ def read_txt_files(directory):
                 text = f.read().strip()
             dict[base_name] = text
     return dict
+
+
+def default_dict(uDict,defaultz):
+    for k,v in defaultz.items():
+        uDict.setdefault(k, v) 
+    return uDict
+

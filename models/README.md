@@ -6,6 +6,7 @@ git clone git@hf.co:TheBloke/Llama-2-7B-Chat-GGML
 git clone git@hf.co:TheBloke/Llama-2-13B-Chat-GGML
 git clone git@hf.co:TheBloke/StableBeluga-13B-GGML
 git clone git@hf.co:TheBloke/StableBeluga-7B-GGML
+git clone git@hf.co:YeungNLP/firefly-llama2-13b
 
 # size matters
 

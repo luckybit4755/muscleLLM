@@ -10,8 +10,6 @@ from langchain import PromptTemplate, LLMChain
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 
-from utils import read_txt_files
-
 from langchain.chains import ConversationChain
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import (
@@ -29,58 +27,70 @@ from langchain.vectorstores.faiss import FAISS
 from datetime import datetime
 from langchain.memory import VectorStoreRetrieverMemory
 
+from utils import read_txt_files, default_dict
+
 class MuscleLLM:
     LOG = logging.getLogger(__name__)
+    DEFAULT_PERSONALITY_OPTIONS = { "bye": "bye", "hi": "hi", "llm": "AI", "user": "Human"}
     def __init__(self):
-        self.parser = argparse.ArgumentParser(description="my cool script is cool")
-        self.parser.add_argument("--log_directory", type=str, default="logs")
-
-        personality = self.parser.add_argument_group("personality")
-        personality.add_argument("--personality", type=str, default="muscle-man")
-        personality.add_argument("--personality_directory", type=str, default="personality")
-        personality.add_argument("--index_directory", type=str, default="index")
-
-        model = self.parser.add_argument_group("model")
-        model.add_argument("--model_path",         type=str,        required=True  , help="Path to model to load")
-        model.add_argument("--cache",              type=bool,       default=None)
-        model.add_argument("--echo",               type=bool,       default=False  , help="Whether to echo the prompt.")
-        model.add_argument("--f16_kv",             type=bool,       default=True   , help="Use half-precision for key/value cache.")
-        model.add_argument("--last_n_tokens_size", type=int,        default=64     , help="The number of tokens to look back when applying the repeat_penalty.")
-        model.add_argument("--logits_all",         type=bool,       default=False  , help="Return logits for all tokens, not just the last token.")
-        model.add_argument("--logprobs",           type=int,        default=None   , help="The number of logprobs to return. If None, no logprobs are returned.")
-        model.add_argument("--lora_base",          type=str,        default=None   , help="The path to the Llama LoRA base model.")
-        model.add_argument("--lora_path",          type=str,        default=None   , help="The path to the Llama LoRA. If None, no LoRa is loaded.")
-        model.add_argument("--max_tokens",         type=int,        default=256    , help="The maximum number of tokens to generate.")
-        model.add_argument("--n_batch",            type=int,        default=512    , help="Number of tokens to process in parallel. Should be a number between 1 and n_ctx.")
-        model.add_argument("--n_ctx",              type=int,        default=1024   , help="Token context window.")
-        model.add_argument("--n_gpu_layers",       type=int,        default=32     , help="Number of layers to be loaded into gpu memory. Default 32.")
-        model.add_argument("--n_parts",            type=int,        default=-1     , help="Number of parts to split the model into. If -1, the number of parts is automatically determined.")
-        model.add_argument("--n_threads",          type=int,        default=None   , help="Number of threads to use. If None, the number of threads is automatically determined.")
-        model.add_argument("--repeat_penalty",     type=float,      default=1.1    , help="The penalty to apply to repeated tokens.")
-        model.add_argument("--rope_freq_base",     type=float,      default=10000.0, help="Base frequency for rope sampling.")
-        model.add_argument("--rope_freq_scale",    type=float,      default=1.0    , help="Scale factor for rope sampling.")
-        model.add_argument("--seed",               type=int,        default=-1     , help="Seed. If -1, a random seed is used.")
-        model.add_argument("--stop",               type=str,        default=None   , help="A list of strings to stop generation when encountered. Comma separated list.")
-        model.add_argument("--streaming",          type=bool,       default=True   , help="Whether to stream the results, token by token.")
-        model.add_argument("--suffix",             type=str,        default=None   , help="A suffix to append to the generated text. If None, no suffix is appended.")
-        model.add_argument("--tags",               type=str,        default=None   , help="Tags to add to the run trace. Comma separated list.")
-        model.add_argument("--temperature",        type=float,      default=0.8    , help="The temperature to use for sampling.")
-        model.add_argument("--top_k",              type=int,        default=40     , help="The top-k value to use for sampling.")
-        model.add_argument("--top_p",              type=float,      default=0.95   , help="The top-p value to use for sampling.")
-        model.add_argument("--use_mlock",          type=bool,       default=False  , help="Force system to keep model in RAM.")
-        model.add_argument("--use_mmap",           type=bool,       default=True   , help="Whether to keep the model loaded in RAM")
-        model.add_argument("--verbose",            type=bool,       default=True   , help="Print verbose output to stderr.")
-        model.add_argument("--vocab_only",         type=bool,       default=False  , help="Only load the vocabulary, no weights.")
-        # todo: param model_kwargs         Dict[str, Any] [Optional] :: Any additional parameters to pass to llama_cpp.Llama.
-        # todo : model.add_argument("--metadata            type=                          Dict[str, Any] = None                                          Metadata to add to the run trace.
-        model.add_argument("--embeddings_model_name", type=str, default="sentence-transformers/all-MiniLM-L6-v2")
+        self.argumentParser = self.makeArgumentParser()
 
     def main(self):
-        args = self.parser.parse_args()
-        personality = read_txt_files( f'{args.personality_directory}/{args.personality}' )
+        args = self.argumentParser.parse_args()
+
+        personality = self.readPersonality( args )
+
+        embeddings, vectorstore, memory = self.youreTalkingAboutMemory(args,personality)
+
+        prompt = self.createPrompt( personality );
 
         llm = self.createLLM(args)
 
+        ########################################################################
+        # chain
+
+        chain = ConversationChain(
+            prompt=prompt,
+            llm=llm,
+            memory=memory,
+            verbose=False,
+            #memory=ConversationBufferMemory(
+            #    human_prefix=personality['user'],
+            #    ai_prefix=personality['llm'],
+            #),
+        )
+
+        ########################################################################
+        # weaksauce shell
+
+        print( f"type {personality['bye']} or /quit to exit" );
+        print( chain.predict(input=personality['hi']) )
+
+        while True:
+            loser_says_what = input(f"----\n{personality['user']}>> " )
+            response = chain.predict(input=loser_says_what)
+            print( f"\n{personality['llm']}>> {response}" )
+
+            # idk if this helps...
+            #memory.save_context({"input":loser_says_what},{"output":response})
+            memory.save_context( {personality['user']:loser_says_what}, {personality['llm']:response}) 
+
+            if "/quit" == loser_says_what or loser_says_what.lower() == personality['bye'].lower():
+                break
+
+        print('saving conversation')
+        vectorstore.save_local(args.index_directory, args.personality)
+        print('saved conversation')
+
+
+    def readPersonality(self, args):    
+        return default_dict( 
+            read_txt_files( f'{args.personality_directory}/{args.personality}' ),
+            MuscleLLM.DEFAULT_PERSONALITY_OPTIONS
+        )
+
+
+    def youreTalkingAboutMemory(self, args, personality):
         ########################################################################
         # index....
 
@@ -104,36 +114,17 @@ class MuscleLLM:
             ai_prefix=personality['llm'],
         )
 
-        prompt = PromptTemplate(input_variables=["history", "input"], template=personality['chat'])
-        chain = ConversationChain(
-            prompt=prompt,
-            llm=llm,
-            memory=memory,
-            verbose=False,
-            #memory=ConversationBufferMemory(
-            #    human_prefix=personality['user'],
-            #    ai_prefix=personality['llm'],
-            #),
+        return embeddings, vectorstore, memory
+
+
+    def createPrompt(self, personality):
+        template = personality['chat']
+        for k,v in personality.items():
+            template = template.replace("{" + k + "}",v)
+        return PromptTemplate(
+            input_variables=["history", "input"], 
+            template=template,
         )
-
-        print( f"type {personality['bye']} or /quit to exit" );
-        print( chain.predict(input=personality['hi']) )
-
-        while True:
-            loser_says_what = input(f"----\n{personality['user']}>> " )
-            response = chain.predict(input=loser_says_what)
-            print( f"\n{personality['llm']}>> {response}" )
-
-            # idk if this helps...
-            #memory.save_context({"input":loser_says_what},{"output":response})
-            memory.save_context( {personality['user']:loser_says_what}, {personality['llm']:response}) 
-
-            if "/quit" == loser_says_what or loser_says_what.lower() == personality['bye'].lower():
-                break
-
-        print('saving conversation')
-        vectorstore.save_local(args.index_directory, args.personality)
-        print('saved conversation')
 
 
     def createLLM(self, args):
@@ -189,6 +180,52 @@ class MuscleLLM:
         print( f'MMloaded ${model_path}' )
         return llm
 
+
+    def makeArgumentParser(self):
+        argumentParser = argparse.ArgumentParser(description="script to run llm with different personalities")
+        argumentParser.add_argument("--log_directory", type=str, default="logs")
+
+        personality = argumentParser.add_argument_group("personality")
+        personality.add_argument("--personality", "-p",  type=str, default="muscle-man")
+        personality.add_argument("--personality_directory", type=str, default="personality")
+        personality.add_argument("--index_directory", type=str, default="index")
+
+        model = argumentParser.add_argument_group("model")
+        model.add_argument("--model_path",        "-m",  type=str,        required=True  , help="Path to model to load")
+        model.add_argument("--cache",                    type=bool,       default=None)
+        model.add_argument("--echo",                     type=bool,       default=False  , help="Whether to echo the prompt.")
+        model.add_argument("--f16_kv",                   type=bool,       default=True   , help="Use half-precision for key/value cache.")
+        model.add_argument("--last_n_tokens_size",       type=int,        default=64     , help="The number of tokens to look back when applying the repeat_penalty.")
+        model.add_argument("--logits_all",               type=bool,       default=False  , help="Return logits for all tokens, not just the last token.")
+        model.add_argument("--logprobs",                 type=int,        default=None   , help="The number of logprobs to return. If None, no logprobs are returned.")
+        model.add_argument("--lora_base",                type=str,        default=None   , help="The path to the Llama LoRA base model.")
+        model.add_argument("--lora_path",                type=str,        default=None   , help="The path to the Llama LoRA. If None, no LoRa is loaded.")
+        model.add_argument("--max_tokens",               type=int,        default=256    , help="The maximum number of tokens to generate.")
+        model.add_argument("--n_batch",                  type=int,        default=512    , help="Number of tokens to process in parallel. Should be a number between 1 and n_ctx.")
+        model.add_argument("--n_ctx",                    type=int,        default=1024   , help="Token context window.")
+        model.add_argument("--n_gpu_layers",             type=int,        default=32     , help="Number of layers to be loaded into gpu memory. Default 32.")
+        model.add_argument("--n_parts",                  type=int,        default=-1     , help="Number of parts to split the model into. If -1, the number of parts is automatically determined.")
+        model.add_argument("--n_threads",                type=int,        default=None   , help="Number of threads to use. If None, the number of threads is automatically determined.")
+        model.add_argument("--repeat_penalty",           type=float,      default=1.1    , help="The penalty to apply to repeated tokens.")
+        model.add_argument("--rope_freq_base",           type=float,      default=10000.0, help="Base frequency for rope sampling.")
+        model.add_argument("--rope_freq_scale",          type=float,      default=1.0    , help="Scale factor for rope sampling.")
+        model.add_argument("--seed",                     type=int,        default=-1     , help="Seed. If -1, a random seed is used.")
+        model.add_argument("--stop",                     type=str,        default=None   , help="A list of strings to stop generation when encountered. Comma separated list.")
+        model.add_argument("--streaming",                type=bool,       default=True   , help="Whether to stream the results, token by token.")
+        model.add_argument("--suffix",                   type=str,        default=None   , help="A suffix to append to the generated text. If None, no suffix is appended.")
+        model.add_argument("--tags",                     type=str,        default=None   , help="Tags to add to the run trace. Comma separated list.")
+        model.add_argument("--temperature",              type=float,      default=0.8    , help="The temperature to use for sampling.")
+        model.add_argument("--top_k",                    type=int,        default=40     , help="The top-k value to use for sampling.")
+        model.add_argument("--top_p",                    type=float,      default=0.95   , help="The top-p value to use for sampling.")
+        model.add_argument("--use_mlock",                type=bool,       default=False  , help="Force system to keep model in RAM.")
+        model.add_argument("--use_mmap",                 type=bool,       default=True   , help="Whether to keep the model loaded in RAM")
+        model.add_argument("--verbose",                  type=bool,       default=False  , help="Print verbose output to stderr.")
+        model.add_argument("--vocab_only",               type=bool,       default=False  , help="Only load the vocabulary, no weights.")
+        # todo: param model_kwargs         Dict[str, Any] [Optional] :: Any additional parameters to pass to llama_cpp.Llama.
+        # todo : model.add_argument("--metadata            type=                          Dict[str, Any] = None                                          Metadata to add to the run trace.
+        model.add_argument("--embeddings_model_name", type=str, default="sentence-transformers/all-MiniLM-L6-v2")
+
+        return argumentParser
 
 if __name__ == "__main__":
     MuscleLLM().main()
