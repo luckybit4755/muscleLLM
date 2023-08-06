@@ -15,10 +15,12 @@ welcome to participate!
 
 Currently, there are just 2 personalities: Muscle Man and AI Assistant. 
 
-1. ./muscleLLM.py --model_path models/StableBeluga-13B-GGML/stablebeluga-13b.ggmlv3.q2_K.bin 
-2. ./muscleLLM.py --model_path [yada-yada] --personality ai
+1. ./muscleLLM.py -m models/StableBeluga-13B-GGML/stablebeluga-13b.ggmlv3.q2_K.bin 
+2. ./muscleLLM.py -m [yada-yada] -p ai
 
 So, the personality bits are stored in subdirectories with multiple .txt files because I'm kind of lazy and it's convenient for me. 
+
+Be sure to run in the same environment you build lama-cpp-python etc
 
 You can contribute if you want!
 
@@ -46,6 +48,6 @@ You can contribute if you want!
 ## even more dependencies
 
 1. pip install langchain sentence_transformers faiss-gpu
-3. ./muscleLLM.py --model_path models/StableBeluga-13B-GGML/stablebeluga-13b.ggmlv3.q2_K.bin
-3. ./muscleLLM.py --model_path models/StableBeluga-13B-GGML/stablebeluga-13b.ggmlv3.q2_K.bin --personality ai 
+3. ./muscleLLM.py -m models/StableBeluga-13B-GGML/stablebeluga-13b.ggmlv3.q2_K.bin
+3. ./muscleLLM.py -m models/StableBeluga-13B-GGML/stablebeluga-13b.ggmlv3.q2_K.bin -p ai 
 
