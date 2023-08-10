@@ -1,5 +1,8 @@
-faiss-gpu 
+faiss-cpu 
 langchain 
 pandas
 sentence_transformers 
 tabulate
+
+# see the README.md
+llama-cpp-python
