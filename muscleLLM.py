@@ -6,7 +6,11 @@ import logging
 import os
 import re
 
-from langchain.llms import LlamaCpp
+from langchain.llms import (
+        LlamaCpp,
+        KoboldApiLLM
+)
+
 from langchain import PromptTemplate, LLMChain
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
@@ -32,9 +36,12 @@ from datetime import datetime
 from langchain.memory import VectorStoreRetrieverMemory
 
 import pandas as pd
+import numpy as np
 from tabulate import tabulate
 
-from utils import read_txt_files, default_dict, load_document
+from lib.utils            import read_txt_files, default_dict
+from lib.goop_soup        import make_argument_parser
+from lib.document_loaders import load_document
 
 #############################################################################
 
@@ -50,10 +57,9 @@ class MuscleLLM:
     DEFAULT_PERSONALITY_OPTIONS = { "bye": "bye", "hi": "hi", "llm": "AI", "user": "Human"}
 
     def __init__(self):
-        self.argumentParser = self.makeArgumentParser()
+        self.argumentParser = make_argument_parser()
 
     def main(self):
-        
         args = self.argumentParser.parse_args()
 
         personality = self.readPersonality( args )
@@ -66,12 +72,11 @@ class MuscleLLM:
 
         chain = LLMChain(prompt=prompt, llm=llm)
 
-        # TODO: clean this up
-        help, commands = self.getHelp( args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain )
+        # TODO: clean these up
+        help, commands = self.getHelp(args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain)
+        self.shell(args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain, help, commands)
 
-        ########################################################################
-        # weaksauce shell
-
+    def shell(self, args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain, help, commands):
         commands["/help"]({})
         print( chain.predict(**input_variables) )
 
@@ -96,24 +101,33 @@ class MuscleLLM:
 
             input_variables['input'] = loser_says_what
 
+            #print("HISTORY SEARCH")
             input_variables['history'], matched_docs = self.searchVectorStore(
                 loser_says_what, 
                 history,
-                args.history_search_results,
+                embeddings,
             )
 
             if 'dox' in input_variables:
+                #print("DOX SEARCH")
                 input_variables['dox'], matched_docs = self.searchVectorStore(
                     loser_says_what, 
                     dox,
-                    args.dox_search_results,
+                    embeddings,
                 )
 
             # predict, display, and save the results
 
             response = chain.predict(**input_variables)
             print( f"\n{personality['llm']}>> {response}" )
-            memory.save_context( {personality['user']:loser_says_what}, {personality['llm']:response}) 
+
+            # save_context(inputs: Dict[str, Any], outputs: Dict[str, str]) → None
+            memory.save_context( 
+                {personality['user']:loser_says_what}, 
+                {personality['llm']:response},
+                #{"input":loser_says_what}, 
+                #{"output":response},
+            ) 
 
             # handle bye 
 
@@ -129,6 +143,7 @@ class MuscleLLM:
             MuscleLLM.DEFAULT_PERSONALITY_OPTIONS
         )
 
+
     def getHelp(self, args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain ):
         help = {
             personality['bye']: "say bye and quit the chat",
@@ -139,11 +154,15 @@ class MuscleLLM:
             "/add <filename>" : "add a file to the dox",
             "/save"           : "save history and dox",
         }
+        want=3
+        search=10
+        minRating=.2
+        debug=True
         commands = {
             "/quit"     : lambda values: True,
             "/help"     : lambda values: self.printTable(help,{"name": "input", "value": "result"}),
-            "/dox"      : lambda values: self.searchDox(values, dox, args.dox_search_results),
-            "/history"  : lambda values: self.searchDox(values, history, args.history_search_results),
+            "/dox"      : lambda values: (self.searchVectorStore(values, dox,     embeddings, want, search, minRating, debug ))[1],
+            "/history"  : lambda values: (self.searchVectorStore(values, history, embeddings, want, search, minRating, debug ))[1],
             "/add"      : lambda values: self.addDox(values, dox, args),
             "/save"     : lambda values: self.saveDox(history, dox, args.index_directory, args.personality)
         }
@@ -169,9 +188,10 @@ class MuscleLLM:
         if os.path.exists(f'{index_directory}/{storeName}.faiss'):
             vectorstore = FAISS.load_local(index_directory, embeddings, storeName)
         else:
+            embeddings_size = len(embeddings.embed_query("you know who else likes embeddings? my mom!"))
             vectorstore = FAISS(
                 embeddings.embed_query, 
-                faiss.IndexFlatL2(384), # FIXME: let's not hard code stuff.. for openAi embed is 1536
+                faiss.IndexFlatL2(embeddings_size),
                 InMemoryDocstore({}),
                 {} #index_to_docstore_id
             )
@@ -193,74 +213,135 @@ class MuscleLLM:
         prompt = PromptTemplate( input_variables=variables, template=template,)
         return prompt, input_variables
 
-
     def createLLM(self, args):
+        if args.llama_cpp_model_path:
+            return self.createLlamaCpp(args)
+        if args.kobold_cpp_endpoint:
+            return self.createKoboldCpp(args)
+        raise ValueError("need to define either llama_cpp_model_path or kobold_cpp_endpoint")
+
+    def createLlamaCpp(self,args):
         callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
-        MuscleLLM.LOG.info( f'loading ${args.model_path}' )
-        print( f'MM: loading ${args.model_path}' )
+        MuscleLLM.LOG.info( f'loading {args.llama_cpp_model_path}' )
+        print( f'MM: loading {args.llama_cpp_model_path}' )
         llm = LlamaCpp(
-            model_path=args.model_path,
-            cache=args.cache,
-            echo=args.echo,
-            f16_kv=args.f16_kv,
-            last_n_tokens_size=args.last_n_tokens_size,
-            logits_all=args.logits_all,
-            logprobs=args.logprobs,
-            lora_base=args.lora_base,
-            lora_path=args.lora_path,
-            max_tokens=args.max_tokens,
-            n_batch=args.n_batch,
-            n_ctx=args.n_ctx,
-            n_gpu_layers=args.n_gpu_layers,
-            n_parts=args.n_parts,
-            n_threads=args.n_threads,
-            repeat_penalty=args.repeat_penalty,
-            rope_freq_base=args.rope_freq_base,
-            rope_freq_scale=args.rope_freq_scale,
-            seed=args.seed,
-            #stop=args.stop.split(","),
-            streaming=args.streaming,
-            suffix=args.suffix,
-            #tags=args.tags.split(","),
-            temperature=args.temperature,
-            top_k=args.top_k,
-            top_p=args.top_p,
-            use_mlock=args.use_mlock,
-            use_mmap=args.use_mmap,
-            verbose=args.verbose,
-            vocab_only=args.vocab_only,
-            #model_kwargs={ "color":True },
+            model_path=args.llama_cpp_model_path,
+            cache=args.llama_cpp_cache,
+            echo=args.llama_cpp_echo,
+            f16_kv=args.llama_cpp_f16_kv,
+            last_n_tokens_size=args.llama_cpp_last_n_tokens_size,
+            logits_all=args.llama_cpp_logits_all,
+            logprobs=args.llama_cpp_logprobs,
+            lora_base=args.llama_cpp_lora_base,
+            lora_path=args.llama_cpp_lora_path,
+            max_tokens=args.llama_cpp_max_tokens,
+            n_batch=args.llama_cpp_n_batch,
+            n_ctx=args.llama_cpp_n_ctx,
+            n_gpu_layers=args.llama_cpp_n_gpu_layers,
+            n_parts=args.llama_cpp_n_parts,
+            n_threads=args.llama_cpp_n_threads,
+            repeat_penalty=args.llama_cpp_repeat_penalty,
+            rope_freq_base=args.llama_cpp_rope_freq_base,
+            rope_freq_scale=args.llama_cpp_rope_freq_scale,
+            seed=args.llama_cpp_seed,
+            #stop=args.llama_cpp_stop.split(","),
+            streaming=args.llama_cpp_streaming,
+            suffix=args.llama_cpp_suffix,
+            #tags=args.llama_cpp_tags.split(","),
+            temperature=args.llama_cpp_temperature,
+            top_k=args.llama_cpp_top_k,
+            top_p=args.llama_cpp_top_p,
+            use_mlock=args.llama_cpp_use_mlock,
+            use_mmap=args.llama_cpp_use_mmap,
+            verbose=args.llama_cpp_verbose,
+            vocab_only=args.llama_cpp_vocab_only,
+            #model_kwargs.llama_cpp_{ "color":True },
         )
 
-        MuscleLLM.LOG.info( f'loaded ${args.model_path}' )
-        print( f'MMloaded ${args.model_path}' )
+        MuscleLLM.LOG.info( f'loaded {args.llama_cpp_model_path}' )
+        print( f'MMloaded {args.llama_cpp_model_path}' )
+        return llm
+
+    def createKoboldCpp(self,args):
+        callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
+        MuscleLLM.LOG.info( f'loading {args.kobold_cpp_endpoint}' )
+        print( f'MM: loading {args.kobold_cpp_endpoint}' )
+
+        llm = KoboldApiLLM(endpoint="http://192.168.1.144:5000", max_length=80)
+        llm = KoboldApiLLM(
+            endpoint=args.kobold_cpp_endpoint,
+            cache=args.kobold_cpp_cache,
+            max_context_length=args.kobold_cpp_max_context_length,
+            max_length=args.kobold_cpp_max_length,
+            rep_pen=args.kobold_cpp_rep_pen,
+            rep_pen_range=args.kobold_cpp_rep_pen_range,
+            rep_pen_slope=args.kobold_cpp_rep_pen_slope,
+            tags=args.kobold_cpp_tags,
+            temperature=args.kobold_cpp_temperature,
+            tfs=args.kobold_cpp_tfs,
+            top_a=args.kobold_cpp_top_a,
+            top_k=args.kobold_cpp_top_k,
+            top_p=args.kobold_cpp_top_p,
+            typical=args.kobold_cpp_typical,
+            use_authors_note=args.kobold_cpp_use_authors_note,
+            use_memory=args.kobold_cpp_use_memory,
+            use_story=args.kobold_cpp_use_story,
+            use_world_info=args.kobold_cpp_use_world_info,
+            verbose=args.kobold_cpp_verbose,
+        )
+
+        MuscleLLM.LOG.info( f'loaded {args.kobold_cpp_endpoint}' )
+        print( f'MMloaded {args.kobold_cpp_endpoint}' )
         return llm
 
 
-    def searchVectorStore(self, query, vectorstore, maxDox=3):
-        MuscleLLM.LOG.info( f'finding documents for {query}' )
-        matched_docs = vectorstore.similarity_search(query, maxDox)
-        txt = ""
+    # return value from 1 to 10-ish
+    def relevance(self, query, txt, embeddings, minRating=.2):
+        q = embeddings.embed_query(query)
+        t = embeddings.embed_query(txt)
+        dot = np.dot(q,t)
+        if dot < minRating:
+            return 1, dot
+        return 1 + (dot - minRating) * 44, dot
+
+
+    def relevanceSearchVectorStore(self, query, vectorstore, embedding, want=3, search=10, minRating=.2, debug=False ):
+        results = []
+        matched_docs = vectorstore.similarity_search(query, search)
         for doc in matched_docs:
-            txt = txt + doc.page_content + " \n\n "
-        MuscleLLM.LOG.info( f'found documents for {query}: {matched_docs}' )
-        return txt, matched_docs
+            txt = doc.page_content
+            rating, dot = self.relevance(query, doc.page_content, embedding, minRating)
+            if rating >= minRating:
+                results.append([txt,rating,dot])
+        results = sorted(results, key=lambda x: x[1], reverse=True)[:want]
+        if debug:
+            l77 = "-"*77
+            print(f"{l77}\nTop {len(results)} Results for '{query}'")
+            n = 0
+            for result in results:
+                n = n + 1
+                txt, rating, dot = results[0]
+                print(f'#{n:2d} {rating:3.1f} {dot:2f} > {txt}')
+                print("-"*44)
+            print(f"{l77}\n\n")
+        return results
+
+
+    def searchVectorStore(self, query, vectorstore, embedding, want=3, search=10, minRating=.2, debug=False ):
+        if isinstance(query, list):
+            query = " ".join(query)
+        elif not isinstance(query, str):
+            raise ValueError("query should be a string or a list")
+        results = self.relevanceSearchVectorStore(query, vectorstore, embedding, want, search, minRating, debug )
+        txt = ""
+        for result in results:
+            txt = txt + result[0] + "\n"
+        return txt, False
 
 
     def printTable(self, uDict, labels = {"name": "name", "value": "value"} ):
         output_list = [{labels["name"]: key, labels["value"]: value} for key, value in uDict.items()]
         print(tabulate(pd.DataFrame( output_list ), headers='keys', tablefmt='psql', showindex=False))
-
-    
-    def searchDox(self, query, vectorstore, maxDox=3):
-        query = " ".join( query )
-        matched_docs = vectorstore.similarity_search(query, maxDox)
-        print("-"*77)
-        print("search for:", query)
-        for doc in matched_docs:
-            print(">>>", doc, doc.page_content )
-            print("-"*33)
-        print("-"*77)
 
 
     # TODO: scrounge https://www.mlq.ai/autogpt-langchain-research-assistant/
@@ -286,59 +367,6 @@ class MuscleLLM:
         print('saving dox')
         dox.save_local(index_directory, personality+"-dox")
         print('saved dox')
-
-
-    def makeArgumentParser(self):
-        argumentParser = argparse.ArgumentParser(description="script to run llm with different personalities")
-        argumentParser.add_argument("--log_directory", type=str, default="logs")
-
-        personality = argumentParser.add_argument_group("personality")
-        personality.add_argument("--personality", "-p",  type=str, default="muscle-man")
-        personality.add_argument("--personality_directory", type=str, default="personality")
-        personality.add_argument("--index_directory", type=str, default="index")
-
-        search = argumentParser.add_argument_group("search")
-        search.add_argument("--dox_chunk_size",         type=int, default=512, help="for the RecursiveCharacterTextSplitter")
-        search.add_argument("--dox_chunk_overlap",      type=int, default=64,  help="for the RecursiveCharacterTextSplitter")
-        search.add_argument("--dox_search_results",     type=int, default=3,   help="number of results for dox search")
-        search.add_argument("--history_search_results", type=int, default=3,   help="number of results for history search")
-
-        model = argumentParser.add_argument_group("model")
-        model.add_argument("--model_path",        "-m",  type=str,        required=True  , help="Path to model to load")
-        model.add_argument("--cache",                    type=bool,       default=None)
-        model.add_argument("--echo",                     type=bool,       default=False  , help="Whether to echo the prompt.")
-        model.add_argument("--f16_kv",                   type=bool,       default=True   , help="Use half-precision for key/value cache.")
-        model.add_argument("--last_n_tokens_size",       type=int,        default=64     , help="The number of tokens to look back when applying the repeat_penalty.")
-        model.add_argument("--logits_all",               type=bool,       default=False  , help="Return logits for all tokens, not just the last token.")
-        model.add_argument("--logprobs",                 type=int,        default=None   , help="The number of logprobs to return. If None, no logprobs are returned.")
-        model.add_argument("--lora_base",                type=str,        default=None   , help="The path to the Llama LoRA base model.")
-        model.add_argument("--lora_path",                type=str,        default=None   , help="The path to the Llama LoRA. If None, no LoRa is loaded.")
-        model.add_argument("--max_tokens",               type=int,        default=256    , help="The maximum number of tokens to generate.")
-        model.add_argument("--n_batch",                  type=int,        default=512    , help="Number of tokens to process in parallel. Should be a number between 1 and n_ctx.")
-        model.add_argument("--n_ctx",                    type=int,        default=1024   , help="Token context window.")
-        model.add_argument("--n_gpu_layers",             type=int,        default=32     , help="Number of layers to be loaded into gpu memory. Default 32.")
-        model.add_argument("--n_parts",                  type=int,        default=-1     , help="Number of parts to split the model into. If -1, the number of parts is automatically determined.")
-        model.add_argument("--n_threads",                type=int,        default=None   , help="Number of threads to use. If None, the number of threads is automatically determined.")
-        model.add_argument("--repeat_penalty",           type=float,      default=1.1    , help="The penalty to apply to repeated tokens.")
-        model.add_argument("--rope_freq_base",           type=float,      default=10000.0, help="Base frequency for rope sampling.")
-        model.add_argument("--rope_freq_scale",          type=float,      default=1.0    , help="Scale factor for rope sampling.")
-        model.add_argument("--seed",                     type=int,        default=-1     , help="Seed. If -1, a random seed is used.")
-        model.add_argument("--stop",                     type=str,        default=None   , help="A list of strings to stop generation when encountered. Comma separated list.")
-        model.add_argument("--streaming",                type=bool,       default=True   , help="Whether to stream the results, token by token.")
-        model.add_argument("--suffix",                   type=str,        default=None   , help="A suffix to append to the generated text. If None, no suffix is appended.")
-        model.add_argument("--tags",                     type=str,        default=None   , help="Tags to add to the run trace. Comma separated list.")
-        model.add_argument("--temperature",              type=float,      default=0.8    , help="The temperature to use for sampling.")
-        model.add_argument("--top_k",                    type=int,        default=40     , help="The top-k value to use for sampling.")
-        model.add_argument("--top_p",                    type=float,      default=0.95   , help="The top-p value to use for sampling.")
-        model.add_argument("--use_mlock",                type=bool,       default=False  , help="Force system to keep model in RAM.")
-        model.add_argument("--use_mmap",                 type=bool,       default=True   , help="Whether to keep the model loaded in RAM")
-        model.add_argument("--verbose",                  type=bool,       default=False  , help="Print verbose output to stderr.")
-        model.add_argument("--vocab_only",               type=bool,       default=False  , help="Only load the vocabulary, no weights.")
-        # todo: param model_kwargs         Dict[str, Any] [Optional] :: Any additional parameters to pass to llama_cpp.Llama.
-        # todo : model.add_argument("--metadata            type=                          Dict[str, Any] = None                                          Metadata to add to the run trace.
-        model.add_argument("--embeddings_model_name", type=str, default="sentence-transformers/all-MiniLM-L6-v2")
-
-        return argumentParser
 
 if __name__ == "__main__":
     MuscleLLM().main()

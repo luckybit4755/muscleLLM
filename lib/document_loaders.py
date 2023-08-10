@@ -1,3 +1,4 @@
+import os
 from langchain.document_loaders import (
    BSHTMLLoader,
    PyPDFLoader,
@@ -182,3 +183,10 @@ DOCUMENT_LOADERS = {
     'xxx':  WikipediaLoader,
     'xxx':  YoutubeLoader,
 }
+
+def load_document(filename):
+    suffix = os.path.splitext(filename)[1][1:]  # Get the file suffix
+    if suffix in DOCUMENT_LOADERS:
+        return DOCUMENT_LOADERS[suffix](filename).load_and_split()
+    print( f'no loader found found for {filename} ({suffix}), bro' )
+    return None
