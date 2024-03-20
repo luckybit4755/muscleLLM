@@ -51,12 +51,19 @@ Not really needed but pretty sweet
 2. edit the makefile change: NVCCFLAGS += -arch=all ; instead of arch=native
 3. make clean && LLAMA_CUBLAS=1 make -j
 
-
 ## get models if needed
 
 git clone git@hf.co:TheBloke/Llama-2-7B-Chat-GGML
 
 idk of other sources for GGML models or if GPTQ models will work...
+
+## running the optional http endpoint
+
+```
+	./muscleLLM.py -m starling-lm-7b-alpha.Q8_0.gguf -p starling --llama_cpp_max_tokens 2048 --http 13031
+```
+
+Then you can just curl into it: ```curl -d "what's the frequency, kenneth?" http://127.0.0.1:13031/```
 
 # ideas for more awesome:
 
@@ -64,4 +71,4 @@ idk of other sources for GGML models or if GPTQ models will work...
 2. multi-actor stories
 
 https://github.com/ShumzZzZz/GPT-Rambling/blob/main/LangChain%20Specific/langchain_persist_conversation_memory.ipynb
-
+https://huggingface.co/TheBloke/Starling-LM-7B-alpha-GGUF/tree/main is nice
