@@ -2,6 +2,7 @@
 #############################################################################
 
 import argparse
+import json
 import logging
 import os
 import re
@@ -12,6 +13,14 @@ from langchain.llms import (
 )
 
 from langchain import PromptTemplate, LLMChain
+from langchain.prompts import ChatPromptTemplate
+from langchain.prompts.chat import (
+    AIMessagePromptTemplate,
+    HumanMessagePromptTemplate, 
+    SystemMessage, 
+    SystemMessagePromptTemplate
+)
+
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 
@@ -25,6 +34,7 @@ from langchain.schema import (
     BaseMemory,
     HumanMessage,
     SystemMessage,
+
 )
 
 import faiss
@@ -43,6 +53,11 @@ from lib.utils            import read_txt_files, default_dict
 from lib.goop_soup        import make_argument_parser
 from lib.document_loaders import load_document
 
+# unfortunately, flask is frakncnasdf!@#$1!!
+#from flask import Flask, request, jsonify
+
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 #############################################################################
 
 #############################################################################
@@ -60,6 +75,19 @@ class MuscleLLM:
         self.argumentParser = make_argument_parser()
 
     def main(self):
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
+        print("PPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIINNNNNNNNNNNNNNNNNNNNNNFFFFFFFFFFFFFFFFFFFFUUUUUUUULLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL!")
         args = self.argumentParser.parse_args()
 
         personality = self.readPersonality( args )
@@ -67,21 +95,38 @@ class MuscleLLM:
         embeddings, history, dox, memory = self.youreTalkingAboutMemory(args,personality)
 
         prompt, input_variables = self.createPrompt( personality )
+        print( 'prompt is', prompt )
 
         llm = self.createLLM(args)
 
-        chain = LLMChain(prompt=prompt, llm=llm)
+        chain = LLMChain(prompt=prompt, llm=llm, verbose=True)
 
         # TODO: clean these up
         help, commands = self.getHelp(args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain)
-        self.shell(args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain, help, commands)
+
+        if -1 == args.http:
+            self.shell(args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain, help, commands)
+        else:
+            self.http(args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain, help, commands)
+
 
     def shell(self, args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain, help, commands):
         commands["/help"]({})
-        print( chain.predict(**input_variables) )
+        #print( chain.predict(**input_variables) )
+        
+        #response = llm(prompt.format_messages(**input_variables))
+        #response = chain(input_variables)
+        #print( response )
+
+        print("P1: >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+        print(personality['hi'])
+        print("P1: <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
+
+        llm = personality['llm']
+        user = personality['user']
 
         while True:
-            loser_says_what = input(f"----\n{personality['user']}>> " )
+            loser_says_what = input(f"----\n{user}>> " )
             input_parts = loser_says_what.strip().split()
             if 0 == len( input_parts ):
                 continue
@@ -94,6 +139,7 @@ class MuscleLLM:
                     break
                 continue
             if "/" == command[0]:
+                print("P1: >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
                 print(f"unknown command:{command}")
                 continue
 
@@ -116,15 +162,42 @@ class MuscleLLM:
                     embeddings,
                 )
 
+
+            # valerie: disable this for now
+            input_variables['history'] = ''
+            input_variables['dox'] = ''
+
+
             # predict, display, and save the results
 
-            response = chain.predict(**input_variables)
-            print( f"\n{personality['llm']}>> {response}" )
+            response = chain.predict(**input_variables,
+                human_prefix="Mordecai",
+                ai_prefix="Muscle Man",
+            )
+
+            # valerie: idk what this was supposed to accomplish...
+            # for message in self.splitChatMessages(response, personality, False, not False ):
+            #     print("P2: >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+            #     print("suck", message )
+            #     print("P2: <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
+            # continue
+
+
+            #response = re.sub(r'^AI:\s*',    f'{llm}:',  response, flags=re.MULTILINE)
+            #response = re.sub(r'^Human:\s*', f'{user}:', response, flags=re.MULTILINE)
+            #response = response.strip()
+            #response = chain(input_variables)
+            #response = llm(prompt.format_messages(**input_variables))
+            print("P3: >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+            print( f"\n{llm}>> {response}" )
+            print("P3: <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
+            if not response:
+                print(f"\n{llm}>> *farts*")
 
             # save_context(inputs: Dict[str, Any], outputs: Dict[str, str]) → None
             memory.save_context( 
-                {personality['user']:loser_says_what}, 
-                {personality['llm']:response},
+                {user:loser_says_what}, 
+                {llm:response},
                 #{"input":loser_says_what}, 
                 #{"output":response},
             ) 
@@ -136,6 +209,56 @@ class MuscleLLM:
 
         commands["/save"]({})
 
+
+
+
+    def http(self, args, personality, embeddings, history, dox, memory, prompt, input_variables, llm, chain, help, commands):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-type','text/html')
+                self.end_headers()
+
+                message = "Hey... sry.. try post instead, yo..."
+                self.wfile.write(bytes(message, "utf8"))
+
+            def do_POST(self):
+                self.send_response(200)
+                self.send_header('Content-type','text/html')
+                self.end_headers()
+
+                content_len = int(self.headers.get('Content-Length'))
+                request = self.rfile.read(content_len)
+
+                input_variables['input'] = request
+                input_variables['history'] = ''
+                input_variables['dox'] = ''
+                response = chain.predict(**input_variables
+                    #, human_prefix="Mordecai"
+                    #, ai_prefix="Muscle Man"
+                )
+                message = response #"Hello, World! Here is a POST response"
+                self.wfile.write(bytes(message, "utf8"))
+
+        with HTTPServer(('', args.http), Handler) as server:
+            server.serve_forever()
+
+        #app = Flask('bcrack')
+        #self.chain = chain
+        #
+        #@app.route('/', methods=['POST'])
+        #def flasko():
+        #    input_variables['input'] = request.data
+        #    input_variables['history'] = ''
+        #    input_variables['dox'] = ''
+        #    response = self.chain.predict(**input_variables
+        #        #, human_prefix="Mordecai"
+        #        #, ai_prefix="Muscle Man"
+        #    )
+        #    return response
+        #
+        #app.run(debug=True, host='localhost', port=args.http)
+        #
 
     def readPersonality(self, args):    
         return default_dict( 
@@ -198,7 +321,16 @@ class MuscleLLM:
         return vectorstore
 
 
-    def createPrompt(self, personality):
+    def createPrompt(self, personality, debug=False):
+        input_variables = {}
+        for k in re.findall(r'\{([a-zA-Z]+)\}', personality['chat']):
+            input_variables[k] = ""
+        chat = personality["chat"]
+        return ChatPromptTemplate.from_messages(self.splitChatMessages(chat, personality, True, debug)), input_variables
+
+
+    def createPromptOld(self, personality):
+        # old mechanism...
         template = personality['chat']
         for k,v in personality.items():
             template = template.replace("{" + k + "}",v)
@@ -213,6 +345,76 @@ class MuscleLLM:
         prompt = PromptTemplate( input_variables=variables, template=template,)
         return prompt, input_variables
 
+
+    def splitChatMessages(self, chat, personality, useTemplates=True, debug=True):
+        debug = True
+
+        messages = []
+        if debug:
+            print(f"--------------------------------------------------------------\n{chat}\n-----------------------------------")
+
+        who = "system"
+        lines = []
+        speakerx = r'^({[a-z]+}|[a-z ]+):\s*'
+        lineNumber = 0
+
+        starting = True
+
+
+        for line in chat.split("\n"):
+            lineNumber = 1 + lineNumber
+            if starting and "" == line.strip():
+                continue
+            starting = False
+                
+            if debug:
+                print( f"{lineNumber:2d} {line}" )
+            matchSpeaker = re.match(speakerx, line, re.IGNORECASE)
+            if matchSpeaker:
+                newWho = matchSpeaker.group(1)
+                if not useTemplates:
+                    macro = re.match(r'^{([a-z]+)}', newWho, re.IGNORECASE)
+                    if macro:
+                       macro = macro.group(1)
+                       if not macro in personality:
+                           raise ValueError( f'unknown macro {macro} on line {lineNumber}' )
+                       newWho = personality[ macro ]
+                    else:
+                       print(f"fucking you, {newWho}")
+                if not newWho == who:
+                    self.saveMessage(personality, who, lines, messages, useTemplates, debug)
+                    who = newWho
+                    lines = []
+                line = re.sub(speakerx, '', line, flags=re.IGNORECASE).strip()
+                if not line:
+                    continue
+            if debug:
+                print( f"{who} -> {line}") 
+            lines.append( line )
+        self.saveMessage(personality, who, lines, messages,useTemplates, debug)
+
+        if debug:
+            print( "messages:", messages )
+
+        return messages
+
+
+    def saveMessage(self, personality, who, lines, messages, useTemplates, debug=False):
+        if 0 == len(lines):
+            return
+        txt = "\n".join(lines)
+        if debug:
+            print(f"save {who} {len(lines)} > {txt}")
+        if not useTemplates:
+            return messages.append({who:txt})
+        w = who.lower()
+        if w in set('ai {llm}'.split()):
+            return messages.append(AIMessagePromptTemplate.from_template(txt))
+        if w in set('sys system inst'.split()):
+            return messages.append(SystemMessagePromptTemplate.from_template(txt))
+        return messages.append(HumanMessagePromptTemplate.from_template(txt))
+
+
     def createLLM(self, args):
         if args.llama_cpp_model_path:
             return self.createLlamaCpp(args)
@@ -223,7 +425,7 @@ class MuscleLLM:
     def createLlamaCpp(self,args):
         callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
         MuscleLLM.LOG.info( f'loading {args.llama_cpp_model_path}' )
-        print( f'MM: loading {args.llama_cpp_model_path}' )
+        print( f'MM: llama.cpp: loading {args.llama_cpp_model_path}' )
         llm = LlamaCpp(
             model_path=args.llama_cpp_model_path,
             cache=args.llama_cpp_cache,
@@ -259,13 +461,13 @@ class MuscleLLM:
         )
 
         MuscleLLM.LOG.info( f'loaded {args.llama_cpp_model_path}' )
-        print( f'MMloaded {args.llama_cpp_model_path}' )
+        print( f'MM: kobold.cpp: loaded {args.llama_cpp_model_path}' )
         return llm
 
     def createKoboldCpp(self,args):
         callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
         MuscleLLM.LOG.info( f'loading {args.kobold_cpp_endpoint}' )
-        print( f'MM: loading {args.kobold_cpp_endpoint}' )
+        print( f'MM: kobold.cpp: loading {args.kobold_cpp_endpoint}' )
 
         llm = KoboldApiLLM(endpoint="http://192.168.1.144:5000", max_length=80)
         llm = KoboldApiLLM(
@@ -308,11 +510,17 @@ class MuscleLLM:
     def relevanceSearchVectorStore(self, query, vectorstore, embedding, want=3, search=10, minRating=.2, debug=False ):
         results = []
         matched_docs = vectorstore.similarity_search(query, search)
+        seen = {}
+
         for doc in matched_docs:
             txt = doc.page_content
+            if txt in seen:
+                continue
+            seen[ txt ] = True
             rating, dot = self.relevance(query, doc.page_content, embedding, minRating)
             if rating >= minRating:
                 results.append([txt,rating,dot])
+
         results = sorted(results, key=lambda x: x[1], reverse=True)[:want]
         if debug:
             l77 = "-"*77
@@ -367,6 +575,7 @@ class MuscleLLM:
         print('saving dox')
         dox.save_local(index_directory, personality+"-dox")
         print('saved dox')
+
 
 if __name__ == "__main__":
     MuscleLLM().main()
