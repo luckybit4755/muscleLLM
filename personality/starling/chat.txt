@@ -1,0 +1,9 @@
+GPT4 Correct User: 
+
+{history}
+{dox}
+{input}
+
+<|end_of_turn|>
+
+GPT4 Correct Assistant:

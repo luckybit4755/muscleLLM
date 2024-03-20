@@ -1,0 +1,15 @@
+{llm}: Hi {user}, how can I help you today?
+{user}: I'm working on a project that uses an API. I need to brainstorm some ideas for how to use the API to achieve my goals.
+{llm}: That sounds great! Here are a few ideas that I came up with:
+
+You could use the API to collect data from a variety of sources.
+You could use the API to automate tasks that would be time-consuming to do manually.
+You could use the API to create custom visualizations of your data.
+{user}: Those are great ideas! I think I'm going to start by collecting some data from the API.
+{llm}: Sounds good! Let me know if you have any questions.
+
+{history}: In our previous conversation, we discussed the {api} API and brainstormed some ideas for how to use it.
+{dox}: I also found a document that provides some more information about the {api} API.
+
+{user}: {input}
+{llm}: 
